@@ -16,7 +16,11 @@ import numpy as np
 from Ensemble import MCE
 
 
-file_list = [
+file_list = ['balance-scale.csv',
+             'biodeg.csv',
+             'climate_model.csv',
+             'data_banknote_authentication.csv',
+             'transfusion.csv',
              'segmentation.csv',
              'waveform.csv']
 data_set = []
@@ -124,8 +128,8 @@ def conduct_experiments():
         # ser = ser.rename('diversity_single')
         # ensemble_compositions = ensemble_compositions.append(ser)
 
-        results.to_csv(path_or_buf=file_name.split('.')[0] + "_Wyniki4.csv")
-        ensemble_compositions.to_csv(path_or_buf=file_name.split('.')[0] + "_Sklad4.csv")
+        results.to_csv(path_or_buf=file_name.split('.')[0] + "_Wyniki5.csv")
+        ensemble_compositions.to_csv(path_or_buf=file_name.split('.')[0] + "_Sklad5.csv")
 
 
 if __name__ == "__main__":

@@ -169,8 +169,8 @@ class MCE(BaseEnsemble, ClassifierMixin):
         elif ensemble_type == 'quality_single':
             self.ensemble = self._ensemble_quality_single
 
-        for m in self.ensemble_:
-            m.fit(self.X_, self.y_)
+        # for m in self.ensemble_:
+        #     m.fit(self.X_, self.y_)
 
     def get_ensemble_composition(self):
         types = [type(cls) for cls in self.ensemble_]
@@ -193,14 +193,14 @@ class MCE(BaseEnsemble, ClassifierMixin):
         self.y_ = y
         self.classes_ = np.unique(y)
 
-        sss = StratifiedShuffleSplit(n_splits=1, test_size=0.5, random_state=0)
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=0.3, random_state=0)
         for train_index, test_index in sss.split(X, y):
             self._X_train, self._X_valid = X[train_index], X[test_index]
             self._y_train, self._y_valid = y[train_index], y[test_index]
 
         for e in self._base_estimator_pool:
             for i in range(self._no_bags):
-                X_sample, y_sample = subsample(self._X_train, self._y_valid)
+                X_sample, y_sample = subsample(self._X_train, self._y_train)
                 new_e = clone(e)
                 new_e.fit(X_sample, y_sample)
                 self.ensemble_.append(new_e)
