@@ -211,7 +211,7 @@ class MCE(BaseEnsemble, ClassifierMixin):
         self.y_ = y
         self.classes_ = np.unique(y)
 
-        sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=0)
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=0.3, random_state=0)
         for train_index, test_index in sss.split(X, y):
             self._X_train, self._X_valid = X[train_index], X[test_index]
             self._y_train, self._y_valid = y[train_index], y[test_index]
