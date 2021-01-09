@@ -8,9 +8,12 @@ from deap import base, creator, tools, algorithms
 from operator import itemgetter
 from random import randrange, randint
 from collections import Counter
+from platypus import nondominated, Problem, Real, Integer, Binary, unique
+from platypus.algorithms import NSGAII
 
 import numpy as np
 import math
+import functools
 
 
 class MCE(BaseEnsemble, ClassifierMixin):
@@ -63,7 +66,7 @@ class MCE(BaseEnsemble, ClassifierMixin):
 
     @staticmethod
     def Q_statistic(individual, pairwise_q_stat):
-        classifiers = np.where(individual == 1)[0]
+        classifiers = np.where(np.array(individual) == 1)[0]
         if len(classifiers) == 1:
             return 1
         if len(classifiers) == 0:
@@ -145,14 +148,29 @@ class MCE(BaseEnsemble, ClassifierMixin):
         return acc_y_predict
 
     def _prune(self):
-        pareto_set, fitnesses = self._genetic_optimalisation()
-        self._ensemble_quality = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))], self.ensemble_)
-        self._ensemble_diversity = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(1)))], self.ensemble_)
-        self._ensemble_balanced = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=lambda i: abs(i[0]-i[1])))], self.ensemble_)
+        # pareto_set, fitnesses = self._genetic_optimalisation()
+        # self._ensemble_quality = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))], self.ensemble_)
+        # self._ensemble_diversity = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(1)))], self.ensemble_)
+        # self._ensemble_balanced = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=lambda i: abs(i[0]-i[1])))], self.ensemble_)
+
+        problem = Problem(len(self._base_estimator_pool) * self._no_bags, 2)
+        problem.types[:] = Integer(0, 1)
+        problem.directions[0] = Problem.MAXIMIZE
+        problem.directions[1] = Problem.MINIMIZE
+        problem.function = functools.partial(MCE._evaluate, y_predicts=self._y_predict, y_true=self._y_valid,
+                                             pairwise_div_stat=self._pairwise_diversity_stats)
+
+        algorithm = NSGAII(problem)
+        algorithm.run(10000)
+
+        solutions = unique(nondominated(algorithm.result))
+
         pareto_set, fitnesses = self._genetic_optimalisation(optimalisation_type='quality_single')
-        self._ensemble_quality_single = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))], self.ensemble_)
+        self._ensemble_quality_single = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))],
+                                                       self.ensemble_)
         pareto_set, fitnesses = self._genetic_optimalisation(optimalisation_type='diversity_single')
-        self._ensemble_diversity_single = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))], self.ensemble_)
+        self._ensemble_diversity_single = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))],
+                                                         self.ensemble_)
 
 
 
@@ -169,8 +187,8 @@ class MCE(BaseEnsemble, ClassifierMixin):
         elif ensemble_type == 'quality_single':
             self.ensemble = self._ensemble_quality_single
 
-        for m in self.ensemble_:
-            m.fit(self.X_, self.y_)
+        # for m in self.ensemble_:
+        #     m.fit(self.X_, self.y_)
 
     def get_ensemble_composition(self):
         types = [type(cls) for cls in self.ensemble_]
@@ -193,14 +211,14 @@ class MCE(BaseEnsemble, ClassifierMixin):
         self.y_ = y
         self.classes_ = np.unique(y)
 
-        sss = StratifiedShuffleSplit(n_splits=1, test_size=0.5, random_state=0)
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=0)
         for train_index, test_index in sss.split(X, y):
             self._X_train, self._X_valid = X[train_index], X[test_index]
             self._y_train, self._y_valid = y[train_index], y[test_index]
 
         for e in self._base_estimator_pool:
             for i in range(self._no_bags):
-                X_sample, y_sample = subsample(self._X_train, self._y_valid)
+                X_sample, y_sample = subsample(self._X_train, self._y_train)
                 new_e = clone(e)
                 new_e.fit(X_sample, y_sample)
                 self.ensemble_.append(new_e)
