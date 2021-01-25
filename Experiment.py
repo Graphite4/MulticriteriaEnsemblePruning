@@ -17,11 +17,6 @@ from Ensemble import MCE
 
 
 file_list = ['balance-scale.csv',
-             'biodeg.csv',
-             'climate_model.csv',
-             'data_banknote_authentication.csv',
-             'transfusion.csv',
-             'segmentation.csv',
              'waveform.csv']
 data_set = []
 metrics = [bac]
@@ -73,6 +68,10 @@ def experiment(data_X, data_y, classifiers, pruning_strategy=None, **kwargs):
 
 
 def get_dataset(whole_ds, class_label):
+    try:
+        whole_ds.drop(columns='Unnamed: 0', inplace=True)
+    except:
+        pass
     y = whole_ds[class_label].values
     le = LabelEncoder()
     y = le.fit_transform(y)
@@ -94,42 +93,22 @@ def prepare_classifiers():
 
 def conduct_experiments():
     classifiers = prepare_classifiers()
-    pruning_strategy = ['quality','diversity','balanced', 'quality_single', 'doversity_single']
-    results = pd.DataFrame(index=file_list, columns=pruning_strategy)
+    pruning_strategy = ['quality','diversity','balanced', 'quality_single', 'diversity_single']
 
+    results = pd.DataFrame(index=file_list, columns=pruning_strategy)
     for file_name, data in zip(file_list, data_set):
         ensemble_compositions = pd.DataFrame()
         X, y = get_dataset(data, "label")
-        # for s in pruning_strategy:
-        #     r, d = experiment(X, y, classifiers, s)
-        #     results.at[file_name, s] = r
-        #     ser = pd.Series(d)
-        #     ser = ser.rename(s)
-        #     ensemble_compositions = ensemble_compositions.append(ser)
-        r, d = experiment(X, y, classifiers)
-        # results.at[file_name, 'quality'] = r[0]
-        # results.at[file_name, 'diversity'] = r[1]
-        # results.at[file_name, 'balanced'] = r[2]
-        # results.at[file_name, 'quality_single'] = r[3]
-        # results.at[file_name, 'diversity_single'] = r[4]
+        r, d = experiment(X, y, classifiers, no_bags=20)
         for i, s in enumerate(pruning_strategy):
             results.at[file_name, s] = r[i]
             ser = pd.Series(d[i])
             ser = ser.rename(s)
             ensemble_compositions = ensemble_compositions.append(ser)
-        # r2, d2 = experiment(X, y, classifiers, 'quality', diversity_measure=None)
-        # results.at[file_name, 'quality_single'] = r2
-        # ser = pd.Series(d2)
-        # ser = ser.rename('quality_single')
-        # ensemble_compositions = ensemble_compositions.append(ser)
-        # r3, d3 = experiment(X, y, classifiers, 'diversity', quality_metric=None)
-        # results.at[file_name, 'diversity_single'] = r3
-        # ser = pd.Series(d3)
-        # ser = ser.rename('diversity_single')
-        # ensemble_compositions = ensemble_compositions.append(ser)
 
-        results.to_csv(path_or_buf=file_name.split('.')[0] + "_Wyniki5.csv")
-        ensemble_compositions.to_csv(path_or_buf=file_name.split('.')[0] + "_Sklad5.csv")
+
+            ensemble_compositions.to_csv(path_or_buf="wyniki_nowe/" +file_name.split('.')[0] + "_try.csv")
+        results.to_csv("wyniki_nowe/try.csv")
 
 
 if __name__ == "__main__":

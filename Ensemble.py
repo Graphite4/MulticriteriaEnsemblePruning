@@ -6,10 +6,13 @@ from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.metrics import f1_score,  balanced_accuracy_score as bac
 from deap import base, creator, tools, algorithms
 from operator import itemgetter
-from random import randrange, randint
+from random import randrange, randint, sample
 from collections import Counter
 from platypus import nondominated, Problem, Real, Integer, Binary, unique
 from platypus.algorithms import NSGAII
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.over_sampling import RandomOverSampler
+from RandomSubspaceClassifierWrapper import RandomSubspaceClassifierWrapper
 
 import numpy as np
 import math
@@ -38,7 +41,7 @@ class MCE(BaseEnsemble, ClassifierMixin):
         self._y_valid = None
 
         self._y_predict = None
-        self._pairwise_diversity_stats = np.ones((len(self._base_estimator_pool)*self._no_bags, len(self._base_estimator_pool)*self._no_bags))
+        self._pairwise_diversity_stats = None
 
     def _get_pairwise_Q_stat(self):
         # def pairwise_Q_stat(cls1_res, cls2_result):
@@ -79,18 +82,24 @@ class MCE(BaseEnsemble, ClassifierMixin):
 
     @staticmethod
     def get_group(code, full_list):
-        group_list = []
-        for i in range(len(code)):
-            if code[i] == 1:
-                group_list.append(full_list[i])
-        group = np.array(group_list)
-        return group
+        # group_list = []
+        # for i in range(len(code)):
+        #     if code[i] == 1:
+        #         group_list.append(full_list[i])
+        # group = np.array(group_list)
+        if isinstance(full_list, list):
+            return list(np.array(full_list)[np.where(np.array(code) == 1)[0]])
+        else:
+            return full_list[np.where(np.array(code) == 1)[0]]
 
     @staticmethod
     def _evaluate(individual, y_predicts, y_true, pairwise_div_stat):
         predictions = MCE.get_group(individual, y_predicts)
-        y_predict = MCE._majority_voting(predictions)
-        qual = bac(y_true, y_predict)
+        if predictions.size > 0:
+            y_predict = MCE._majority_voting(predictions)
+            qual = bac(y_true, y_predict)
+        else:
+            qual = 0
         div = MCE.Q_statistic(individual, pairwise_div_stat)
         return qual, div
 
@@ -123,12 +132,12 @@ class MCE(BaseEnsemble, ClassifierMixin):
         toolbox.register("population", tools.initRepeat, list, toolbox.individual)
         toolbox.register("mate", tools.cxTwoPoint)
         toolbox.register("mutate", tools.mutFlipBit, indpb=0.05)
-        if self._diversity_measure is not None and self._quality_metric is not None:
+        if optimalisation_type == 'multi':
             toolbox.register("select", tools.selNSGA2)
             toolbox.register("evaluate", MCE._evaluate, y_predicts=self._y_predict, y_true=self._y_valid, pairwise_div_stat=self._pairwise_diversity_stats)
         else:
             toolbox.register("select", tools.selTournament, tournsize=50)
-            if self._quality_metric is not None:
+            if optimalisation_type == 'quality_single':
                 toolbox.register("evaluate", MCE._evaluate_q, y_predicts=self._y_predict, y_true=self._y_valid)
             else:
                 toolbox.register("evaluate", MCE._evaluate_d, pairwise_div_stat=self._pairwise_diversity_stats)
@@ -141,19 +150,17 @@ class MCE(BaseEnsemble, ClassifierMixin):
 
     @staticmethod
     def _majority_voting(y_predict):
-        acc_y_predict = np.empty((y_predict.shape[1],))
-        y_predict = y_predict.astype(int)
-        for i in range(y_predict.shape[1]):
-            acc_y_predict[i] = np.bincount(y_predict[:, i]).argmax()
+        try:
+            acc_y_predict = np.empty((y_predict.shape[1],))
+            y_predict = y_predict.astype(int)
+            for i in range(y_predict.shape[1]):
+                acc_y_predict[i] = np.bincount(y_predict[:, i]).argmax()
+        except:
+            print('UPS')
         return acc_y_predict
 
     def _prune(self):
-        # pareto_set, fitnesses = self._genetic_optimalisation()
-        # self._ensemble_quality = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))], self.ensemble_)
-        # self._ensemble_diversity = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(1)))], self.ensemble_)
-        # self._ensemble_balanced = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=lambda i: abs(i[0]-i[1])))], self.ensemble_)
-
-        problem = Problem(len(self._base_estimator_pool) * self._no_bags, 2)
+        problem = Problem(len(self.ensemble_), 2)
         problem.types[:] = Integer(0, 1)
         problem.directions[0] = Problem.MAXIMIZE
         problem.directions[1] = Problem.MINIMIZE
@@ -164,12 +171,21 @@ class MCE(BaseEnsemble, ClassifierMixin):
         algorithm.run(10000)
 
         solutions = unique(nondominated(algorithm.result))
+        objectives = [sol.objectives for sol in solutions]
+
+        def extract_variables(variables):
+            extracted = [v[0] for v in variables]
+            return extracted
+
+        self._ensemble_quality = self.get_group(extract_variables(solutions[objectives.index(max(objectives, key=itemgetter(0)))].variables), self.ensemble_)
+        self._ensemble_diversity = self.get_group(extract_variables(solutions[objectives.index(min(objectives, key=itemgetter(1)))].variables), self.ensemble_)
+        self._ensemble_balanced = self.get_group(extract_variables(solutions[objectives.index(max(objectives, key=lambda i: abs(i[0]-i[1])))].variables), self.ensemble_)
 
         pareto_set, fitnesses = self._genetic_optimalisation(optimalisation_type='quality_single')
         self._ensemble_quality_single = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))],
                                                        self.ensemble_)
         pareto_set, fitnesses = self._genetic_optimalisation(optimalisation_type='diversity_single')
-        self._ensemble_diversity_single = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))],
+        self._ensemble_diversity_single = self.get_group(pareto_set[fitnesses.index(min(fitnesses, key=itemgetter(0)))],
                                                          self.ensemble_)
 
 
@@ -181,30 +197,49 @@ class MCE(BaseEnsemble, ClassifierMixin):
         elif ensemble_type == 'diversity':
             self.ensemble_ = self._ensemble_diversity
         elif ensemble_type == 'balanced':
-            self.ensemble = self._ensemble_balanced
+            self.ensemble_ = self._ensemble_balanced
         elif ensemble_type == 'diversity_single':
             self.ensemble_ = self._ensemble_diversity_single
         elif ensemble_type == 'quality_single':
-            self.ensemble = self._ensemble_quality_single
-
-        # for m in self.ensemble_:
-        #     m.fit(self.X_, self.y_)
+            self.ensemble_ = self._ensemble_quality_single
 
     def get_ensemble_composition(self):
         types = [type(cls) for cls in self.ensemble_]
         return Counter(types)
 
+    @staticmethod
+    def subsample(X, y, n_sample=None, ratio=1.0):
+        if n_sample is None:
+            n_sample = round(len(X) * ratio)
+        sample_X = np.empty((n_sample, X.shape[1]))
+        sample_y = np.empty((n_sample, 1))
+        for i in range(n_sample):
+            index = randrange(len(X))
+            sample_X[i, :] = X[index, :]
+            sample_y[i] = y[index]
+        return sample_X, sample_y
+
+    @staticmethod
+    def stratified_bagging(X, y, ratio=1.0):
+        n_sample = round(len(X) * ratio)
+        labels = np.unique(y)
+        class_n_sample = [round(n_sample*(len(np.where(y == l)[0])/len(y))) for l in labels]
+
+        class_samples = []
+        class_samples_label = []
+
+        for class_sample, label in zip(class_n_sample, labels):
+            X_samples, y_samples = MCE.subsample(X[np.where(y == label)[0]], y[np.where(y == label)[0]], n_sample=class_sample)
+            class_samples.append(X_samples)
+            class_samples_label.append(y_samples)
+
+        X_sample = np.concatenate(class_samples)
+        y_sample = np.concatenate(class_samples_label)
+        return X_sample, y_sample
+
     def fit(self, X, y):
 
-        def subsample(X, y, ratio=1.0):
-            n_sample = round(len(X) * ratio)
-            sample_X = np.empty((n_sample, X.shape[1]))
-            sample_y = np.empty((n_sample, 1))
-            for i in range(n_sample):
-                index = randrange(len(X))
-                sample_X[i, :] = X[index, :]
-                sample_y[i] = y[index]
-            return sample_X, sample_y
+
 
         X, y = check_X_y(X, y)
         self.X_ = X
@@ -216,18 +251,44 @@ class MCE(BaseEnsemble, ClassifierMixin):
             self._X_train, self._X_valid = X[train_index], X[test_index]
             self._y_train, self._y_valid = y[train_index], y[test_index]
 
+        # rus = RandomUnderSampler(random_state=42)
+        # ros = RandomOverSampler(random_state=13)
+
         for e in self._base_estimator_pool:
             for i in range(self._no_bags):
-                X_sample, y_sample = subsample(self._X_train, self._y_train)
+                #Stratified Bagging
+                X_sample, y_sample = MCE.stratified_bagging(self._X_train, self._y_train, 0.4)
                 new_e = clone(e)
                 new_e.fit(X_sample, y_sample)
                 self.ensemble_.append(new_e)
 
+                #Random Subspace
+                # n = randint(1,X.shape[1])
+                # sample_index = sample(range(0,X.shape[1]), n)
+                # wrap_e = RandomSubspaceClassifierWrapper(new_e, sample_index)
+                # wrap_e.fit(X, y)
+                # self.ensemble_.append(new_e)
+
+                # Random Undersampling
+                # X_sample, y_sample = MCE.subsample(self._X_train, self._y_train, 0.4)
+                # X_sample_rus, y_sample_rus = rus.fit_resample(X_sample, y_sample)
+                # try:
+                #     if len(X_sample_rus) <= 5:
+                #         raise Exception()
+                #     new_e_rus = clone(e)
+                #     new_e_rus.fit(X_sample_rus, y_sample_rus)
+                #     self.ensemble_.append(new_e_rus)
+                # except:
+                #     pass
+
+
         self._y_predict = np.array([member_clf.predict(self._X_valid) for member_clf in self.ensemble_])
+        self._pairwise_diversity_stats = np.ones((len(self.ensemble_), len(self.ensemble_)))
         self._get_pairwise_Q_stat()
         self._prune()
         for m in self.ensemble_:
             m.fit(self.X_, self.y_)
+
 
     def score(self, X, y, sample_weight=None):
         prediction = self.predict(X)
@@ -235,7 +296,12 @@ class MCE(BaseEnsemble, ClassifierMixin):
 
     def ensemble_support_matrix(self, X):
         """ESM."""
-        return np.array([member_clf.predict_proba(X) for member_clf in self.ensemble_])
+        try:
+            result = np.array([member_clf.predict_proba(X) for member_clf in self.ensemble_])
+        except:
+            print("UPS")
+
+        return result
 
     def predict_proba(self, X):
         """Aposteriori probabilities."""
