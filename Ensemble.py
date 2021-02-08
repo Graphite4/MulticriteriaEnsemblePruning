@@ -3,7 +3,7 @@ from sklearn.base import ClassifierMixin, clone
 from sklearn.ensemble import BaseEnsemble
 from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 from sklearn.model_selection import StratifiedShuffleSplit
-from sklearn.metrics import f1_score,  balanced_accuracy_score as bac
+from sklearn.metrics import f1_score, precision_score, recall_score,  balanced_accuracy_score as bac
 from deap import base, creator, tools, algorithms
 from operator import itemgetter
 from random import randrange, randint, sample
@@ -104,6 +104,35 @@ class MCE(BaseEnsemble, ClassifierMixin):
         return qual, div
 
     @staticmethod
+    def _evaluate_imbalance(individual, y_predicts, y_true):
+        predictions = MCE.get_group(individual, y_predicts)
+        if predictions.size > 0:
+            y_predict = MCE._majority_voting(predictions)
+            qual1 = precision_score(y_true.astype("int8"), y_predict.astype("int8"))
+            qual2 = recall_score(y_true.astype("int8"), y_predict.astype("int8"))
+        else:
+            qual1 = 0
+            qual2 = 0
+        return qual1, qual2
+
+    @staticmethod
+    def _evaluate_p(individual, y_predicts, y_true):
+        predictions = MCE.get_group(individual, y_predicts)
+        y_predict = MCE._majority_voting(predictions)
+        qual = precision_score(y_true.astype("int8"), y_predict.astype("int8"))
+        return (qual,)
+
+    @staticmethod
+    def _evaluate_r(individual, y_predicts, y_true):
+        predictions = MCE.get_group(individual, y_predicts)
+        y_predict = MCE._majority_voting(predictions)
+        try:
+            qual = recall_score(y_true.astype("int8"), y_predict.astype("int8"))
+        except:
+            print('UPS')
+        return (qual,)
+
+    @staticmethod
     def _evaluate_q(individual, y_predicts, y_true):
         predictions = MCE.get_group(individual, y_predicts)
         y_predict = MCE._majority_voting(predictions)
@@ -119,6 +148,10 @@ class MCE(BaseEnsemble, ClassifierMixin):
         if optimalisation_type == 'diversity_single':
             creator.create("FitnessMulti", base.Fitness, weights=(-1.0,))
         elif optimalisation_type == 'quality_single':
+            creator.create("FitnessMulti", base.Fitness, weights=(1.0,))
+        elif optimalisation_type == 'precision_single':
+            creator.create("FitnessMulti", base.Fitness, weights=(1.0,))
+        elif optimalisation_type == 'recall_single':
             creator.create("FitnessMulti", base.Fitness, weights=(1.0,))
         else:
             creator.create("FitnessMulti", base.Fitness, weights=(1.0, -1.0))
@@ -139,6 +172,10 @@ class MCE(BaseEnsemble, ClassifierMixin):
             toolbox.register("select", tools.selTournament, tournsize=50)
             if optimalisation_type == 'quality_single':
                 toolbox.register("evaluate", MCE._evaluate_q, y_predicts=self._y_predict, y_true=self._y_valid)
+            elif optimalisation_type == 'precision_single':
+                toolbox.register("evaluate", MCE._evaluate_p, y_predicts=self._y_predict, y_true=self._y_valid)
+            elif optimalisation_type == 'recall_single':
+                toolbox.register("evaluate", MCE._evaluate_r, y_predicts=self._y_predict, y_true=self._y_valid)
             else:
                 toolbox.register("evaluate", MCE._evaluate_d, pairwise_div_stat=self._pairwise_diversity_stats)
 
@@ -163,9 +200,8 @@ class MCE(BaseEnsemble, ClassifierMixin):
         problem = Problem(len(self.ensemble_), 2)
         problem.types[:] = Integer(0, 1)
         problem.directions[0] = Problem.MAXIMIZE
-        problem.directions[1] = Problem.MINIMIZE
-        problem.function = functools.partial(MCE._evaluate, y_predicts=self._y_predict, y_true=self._y_valid,
-                                             pairwise_div_stat=self._pairwise_diversity_stats)
+        problem.directions[1] = Problem.MAXIMIZE
+        problem.function = functools.partial(MCE._evaluate_imbalance, y_predicts=self._y_predict, y_true=self._y_valid)
 
         algorithm = NSGAII(problem)
         algorithm.run(10000)
@@ -178,14 +214,21 @@ class MCE(BaseEnsemble, ClassifierMixin):
             return extracted
 
         self._ensemble_quality = self.get_group(extract_variables(solutions[objectives.index(max(objectives, key=itemgetter(0)))].variables), self.ensemble_)
-        self._ensemble_diversity = self.get_group(extract_variables(solutions[objectives.index(min(objectives, key=itemgetter(1)))].variables), self.ensemble_)
-        self._ensemble_balanced = self.get_group(extract_variables(solutions[objectives.index(max(objectives, key=lambda i: abs(i[0]-i[1])))].variables), self.ensemble_)
+        self._ensemble_diversity = self.get_group(extract_variables(solutions[objectives.index(max(objectives, key=itemgetter(1)))].variables), self.ensemble_)
+        self._ensemble_balanced = self.get_group(extract_variables(solutions[objectives.index(min(objectives, key=lambda i: abs(i[0]-i[1])))].variables), self.ensemble_)
 
         pareto_set, fitnesses = self._genetic_optimalisation(optimalisation_type='quality_single')
         self._ensemble_quality_single = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))],
                                                        self.ensemble_)
-        pareto_set, fitnesses = self._genetic_optimalisation(optimalisation_type='diversity_single')
-        self._ensemble_diversity_single = self.get_group(pareto_set[fitnesses.index(min(fitnesses, key=itemgetter(0)))],
+        # pareto_set, fitnesses = self._genetic_optimalisation(optimalisation_type='diversity_single')
+        # self._ensemble_diversity_single = self.get_group(pareto_set[fitnesses.index(min(fitnesses, key=itemgetter(0)))],
+        #                                                  self.ensemble_)
+
+        pareto_set, fitnesses = self._genetic_optimalisation(optimalisation_type='precision_single')
+        self._ensemble_precision_single = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))],
+                                                       self.ensemble_)
+        pareto_set, fitnesses = self._genetic_optimalisation(optimalisation_type='recall_single')
+        self._ensemble_recall_single = self.get_group(pareto_set[fitnesses.index(max(fitnesses, key=itemgetter(0)))],
                                                          self.ensemble_)
 
 
@@ -202,6 +245,11 @@ class MCE(BaseEnsemble, ClassifierMixin):
             self.ensemble_ = self._ensemble_diversity_single
         elif ensemble_type == 'quality_single':
             self.ensemble_ = self._ensemble_quality_single
+        elif ensemble_type == 'precision_single':
+            self.ensemble_ = self._ensemble_precision_single
+        elif ensemble_type == 'recall_single':
+            self.ensemble_ = self._ensemble_recall_single
+        print('stop')
 
     def get_ensemble_composition(self):
         types = [type(cls) for cls in self.ensemble_]
@@ -252,43 +300,44 @@ class MCE(BaseEnsemble, ClassifierMixin):
             self._y_train, self._y_valid = y[train_index], y[test_index]
 
         # rus = RandomUnderSampler(random_state=42)
-        # ros = RandomOverSampler(random_state=13)
+        ros = RandomOverSampler(random_state=13)
 
         for e in self._base_estimator_pool:
             for i in range(self._no_bags):
                 #Stratified Bagging
-                X_sample, y_sample = MCE.stratified_bagging(self._X_train, self._y_train, 0.4)
-                new_e = clone(e)
-                new_e.fit(X_sample, y_sample)
-                self.ensemble_.append(new_e)
+                # X_sample, y_sample = MCE.stratified_bagging(self._X_train, self._y_train, 0.4)
+                # new_e = clone(e)
+                # new_e.fit(X_sample, y_sample)
+                # self.ensemble_.append(new_e)
 
                 #Random Subspace
-                # n = randint(1,X.shape[1])
+                # new_e = clone(e)
+                # n = randint(1, X.shape[1])
                 # sample_index = sample(range(0,X.shape[1]), n)
                 # wrap_e = RandomSubspaceClassifierWrapper(new_e, sample_index)
                 # wrap_e.fit(X, y)
-                # self.ensemble_.append(new_e)
+                # self.ensemble_.append(wrap_e)
 
                 # Random Undersampling
-                # X_sample, y_sample = MCE.subsample(self._X_train, self._y_train, 0.4)
-                # X_sample_rus, y_sample_rus = rus.fit_resample(X_sample, y_sample)
-                # try:
-                #     if len(X_sample_rus) <= 5:
-                #         raise Exception()
-                #     new_e_rus = clone(e)
-                #     new_e_rus.fit(X_sample_rus, y_sample_rus)
-                #     self.ensemble_.append(new_e_rus)
-                # except:
-                #     pass
+                try:
+                    X_sample, y_sample = MCE.subsample(self._X_train, self._y_train, ratio=0.4)
+                    X_sample_rus, y_sample_rus = ros.fit_resample(X_sample, y_sample)
+
+                    if len(X_sample_rus) <= 5:
+                        raise Exception()
+                    new_e_rus = clone(e)
+                    new_e_rus.fit(X_sample_rus, y_sample_rus)
+                    self.ensemble_.append(new_e_rus)
+                except:
+                    pass
 
 
         self._y_predict = np.array([member_clf.predict(self._X_valid) for member_clf in self.ensemble_])
-        self._pairwise_diversity_stats = np.ones((len(self.ensemble_), len(self.ensemble_)))
-        self._get_pairwise_Q_stat()
+        # self._pairwise_diversity_stats = np.ones((len(self.ensemble_), len(self.ensemble_)))
+        # self._get_pairwise_Q_stat()
         self._prune()
         for m in self.ensemble_:
             m.fit(self.X_, self.y_)
-
 
     def score(self, X, y, sample_weight=None):
         prediction = self.predict(X)
