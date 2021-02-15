@@ -305,10 +305,10 @@ class MCE(BaseEnsemble, ClassifierMixin):
         for e in self._base_estimator_pool:
             for i in range(self._no_bags):
                 #Stratified Bagging
-                # X_sample, y_sample = MCE.stratified_bagging(self._X_train, self._y_train, 0.4)
-                # new_e = clone(e)
-                # new_e.fit(X_sample, y_sample)
-                # self.ensemble_.append(new_e)
+                X_sample, y_sample = MCE.stratified_bagging(self._X_train, self._y_train, 0.4)
+                new_e = clone(e)
+                new_e.fit(X_sample, y_sample)
+                self.ensemble_.append(new_e)
 
                 #Random Subspace
                 # new_e = clone(e)
@@ -319,36 +319,46 @@ class MCE(BaseEnsemble, ClassifierMixin):
                 # self.ensemble_.append(wrap_e)
 
                 # Random Undersampling
-                try:
-                    X_sample, y_sample = MCE.subsample(self._X_train, self._y_train, ratio=0.4)
-                    X_sample_rus, y_sample_rus = ros.fit_resample(X_sample, y_sample)
-
-                    if len(X_sample_rus) <= 5:
-                        raise Exception()
-                    new_e_rus = clone(e)
-                    new_e_rus.fit(X_sample_rus, y_sample_rus)
-                    self.ensemble_.append(new_e_rus)
-                except:
-                    pass
-
+                # try:
+                #     X_sample, y_sample = MCE.subsample(self._X_train, self._y_train, ratio=0.4)
+                #     X_sample_rus, y_sample_rus = ros.fit_resample(X_sample, y_sample)
+                #
+                #     if len(X_sample_rus) <= 5:
+                #         raise Exception()
+                #     new_e_rus = clone(e)
+                #     new_e_rus.fit(X_sample_rus, y_sample_rus)
+                #     self.ensemble_.append(new_e_rus)
+                # except:
+                #     pass
 
         self._y_predict = np.array([member_clf.predict(self._X_valid) for member_clf in self.ensemble_])
         # self._pairwise_diversity_stats = np.ones((len(self.ensemble_), len(self.ensemble_)))
         # self._get_pairwise_Q_stat()
         self._prune()
-        for m in self.ensemble_:
-            m.fit(self.X_, self.y_)
+        # for m in self.ensemble_:
+        #     m.fit(self.X_, self.y_)
 
     def score(self, X, y, sample_weight=None):
         prediction = self.predict(X)
         return sum(prediction == y) / len(y)
 
+    def fix_predict_proba(self, proba):
+        try:
+            for i in range(proba.shape[0]):
+                if proba[i].shape[0] == 1:
+                    proba[i] = np.append(proba[i], [0.0])
+            proba = np.stack(proba)
+        except:
+            proba = np.c_[ proba, np.zeros(proba.shape[0]) ]
+        return proba
+
+
     def ensemble_support_matrix(self, X):
         """ESM."""
         try:
-            result = np.array([member_clf.predict_proba(X) for member_clf in self.ensemble_])
+            result = np.array([member_clf.predict_proba(X)for member_clf in self.ensemble_])
         except:
-            print("UPS")
+            result = np.array([self.fix_predict_proba(member_clf.predict_proba(X)) for member_clf in self.ensemble_])
 
         return result
 
